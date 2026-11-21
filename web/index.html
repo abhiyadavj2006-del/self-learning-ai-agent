@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Self-Learning Agent</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: system-ui, -apple-system, sans-serif; margin: 0;
+         background: #f4f4f5; color: #18181b; }
+  header { background: #18181b; color: #fff; padding: 1rem 1.5rem; }
+  header h1 { margin: 0; font-size: 1.25rem; }
+  header p { margin: .25rem 0 0; color: #a1a1aa; font-size: .9rem; }
+  main { display: flex; gap: 1rem; max-width: 960px; margin: 1rem auto;
+         padding: 0 1rem; align-items: flex-start; flex-wrap: wrap; }
+  .chat { flex: 1 1 480px; background: #fff; border: 1px solid #e4e4e7;
+          border-radius: 12px; display: flex; flex-direction: column;
+          height: 70vh; min-height: 420px; }
+  #log { flex: 1; overflow-y: auto; padding: 1rem; display: flex;
+         flex-direction: column; gap: .5rem; }
+  .msg { max-width: 85%; padding: .6rem .8rem; border-radius: 12px;
+         white-space: pre-wrap; word-break: break-word; line-height: 1.4; }
+  .user { align-self: flex-end; background: #18181b; color: #fff; }
+  .agent { align-self: flex-start; background: #f4f4f5; }
+  .tool { font-size: .75rem; color: #71717a; align-self: flex-start; }
+  form { display: flex; gap: .5rem; padding: .75rem; border-top: 1px solid #e4e4e7; }
+  input { flex: 1; padding: .6rem .8rem; border: 1px solid #d4d4d8;
+          border-radius: 8px; font-size: 1rem; }
+  button { padding: .6rem 1rem; border: 0; border-radius: 8px;
+           background: #18181b; color: #fff; cursor: pointer; font-size: 1rem; }
+  button:hover { background: #3f3f46; }
+  aside { flex: 1 1 240px; background: #fff; border: 1px solid #e4e4e7;
+          border-radius: 12px; padding: 1rem; }
+  aside h2 { margin: 0 0 .5rem; font-size: 1rem; }
+  #facts { list-style: none; margin: 0; padding: 0; }
+  #facts li { padding: .4rem 0; border-bottom: 1px solid #f4f4f5; }
+  #facts li:last-child { border-bottom: 0; }
+  .empty { color: #71717a; }
+  .examples { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .75rem; }
+  .examples button { background: #f4f4f5; color: #18181b; font-size: .85rem;
+                     padding: .4rem .6rem; border: 1px solid #e4e4e7; }
+  #stats { color: #71717a; font-size: .85rem; margin-top: .75rem; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Self-Learning Agent</h1>
+  <p>Rule-based, stdlib-only Python. It remembers facts in SQLite — teach it, restart it, it still knows.</p>
+</header>
+<main>
+  <section class="chat">
+    <div id="log" aria-live="polite"></div>
+    <form id="form">
+      <input id="input" autocomplete="off" placeholder="e.g. remember that my favourite colour is blue" autofocus>
+      <button type="submit">Send</button>
+    </form>
+  </section>
+  <aside>
+    <h2>Remembered facts</h2>
+    <ul id="facts"><li class="empty">Nothing remembered yet.</li></ul>
+    <div class="examples">
+      <button data-q="remember that my favourite colour is blue">Remember a fact</button>
+      <button data-q="what is my favourite colour?">Recall it</button>
+      <button data-q="calculate 12 * (3 + 4)">Calculator</button>
+      <button data-q="search notes for hiking">Search notes</button>
+      <button data-q="what do you know about me?">List facts</button>
+    </div>
+    <p id="stats"></p>
+  </aside>
+</main>
+<script>
+const log = document.getElementById('log');
+const factsEl = document.getElementById('facts');
+const statsEl = document.getElementById('stats');
+const input = document.getElementById('input');
+
+function addMsg(text, cls) {
+  const d = document.createElement('div');
+  d.className = 'msg ' + cls;
+  d.textContent = text;
+  log.appendChild(d);
+  log.scrollTop = log.scrollHeight;
+}
+
+async function refreshFacts() {
+  try {
+    const [f, s] = await Promise.all([
+      fetch('/api/facts').then(r => r.json()),
+      fetch('/api/stats').then(r => r.json())
+    ]);
+    factsEl.innerHTML = f.facts.length
+      ? f.facts.map(([k, v]) => `<li><strong>${k}</strong>: ${v}</li>`).join('')
+      : '<li class="empty">Nothing remembered yet.</li>';
+    const tools = Object.entries(s.tools).map(([k, v]) => `${k}: ${v}`).join(', ') || 'none yet';
+    statsEl.textContent = `${s.facts} fact(s), ${s.interactions} interaction(s). Tools used: ${tools}.`;
+  } catch (e) { /* server unreachable; chat will surface the error */ }
+}
+
+async function send(text) {
+  addMsg(text, 'user');
+  input.value = '';
+  try {
+    const r = await fetch('/api/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: text })
+    });
+    const data = await r.json();
+    addMsg(data.reply, 'agent');
+    if (data.tool) {
+      const t = document.createElement('div');
+      t.className = 'tool';
+      t.textContent = 'tool used: ' + data.tool;
+      log.appendChild(t);
+    }
+  } catch (e) {
+    addMsg('Error: could not reach the server. Is it running?', 'agent');
+  }
+  refreshFacts();
+}
+
+document.getElementById('form').addEventListener('submit', e => {
+  e.preventDefault();
+  const text = input.value.trim();
+  if (text) send(text);
+});
+document.querySelectorAll('.examples button').forEach(b =>
+  b.addEventListener('click', () => send(b.dataset.q)));
+
+addMsg("Hi — I'm a tiny self-learning agent. Teach me a fact (" +
+  "'remember that my favourite colour is blue'), ask me to recall it, " +
+  "or try 'calculate 12 * (3 + 4)'.", 'agent');
+refreshFacts();
+</script>
+</body>
+</html>

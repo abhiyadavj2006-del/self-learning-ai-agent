@@ -1,0 +1,5 @@
+Python tips
+- Use sqlite3 from the standard library for small persistent storage.
+- The ast module lets you safely evaluate arithmetic without eval().
+- A virtual environment keeps dependencies isolated per project.
+- List comprehensions are concise, but readability comes first.

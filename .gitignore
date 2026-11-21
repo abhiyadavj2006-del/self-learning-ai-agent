@@ -1,0 +1,32 @@
+# --- Local memory / data (the agent's SQLite brain) ---
+# The DB is created at runtime and holds the user's personal facts.
+# Never commit it: a fresh clone starts with an empty memory.
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+agent_memory.db
+test_e2e.db
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# --- Local config / secrets (none are needed, but never commit them) ---
+.env
+.env.*
+!.env.example
+
+# --- OS / editor ---
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*~

@@ -1,0 +1,19 @@
+# Optional dependencies -- the agent runs with NO dependencies at all
+# (stdlib + SQLite). Install these only for the features listed.
+#
+# Real Mem0 (open-source memory layer from the video):
+#   pip install mem0ai
+# The Mem0 Python package. With MEM0_API_KEY set, the agent mirrors
+# facts to Mem0 Cloud; without it, mem0ai + OPENAI_API_KEY runs the
+# open-source Memory() locally (in-memory unless Qdrant is configured).
+mem0ai
+
+# Qdrant client (only needed if you run the open-source Mem0 with a
+# persistent Qdrant vector store instead of in-memory storage):
+#   pip install qdrant-client
+# Or just run `docker compose up -d` in this folder for the server;
+# mem0ai talks to it over HTTP and needs no client install here.
+# qdrant-client
+
+# Note: no `openai` package is needed -- llm.py calls OpenAI-compatible
+# APIs with stdlib urllib, so a local Ollama model works too.

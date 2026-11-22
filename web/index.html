@@ -40,12 +40,17 @@
   .examples button { background: #f4f4f5; color: #18181b; font-size: .85rem;
                      padding: .4rem .6rem; border: 1px solid #e4e4e7; }
   #stats { color: #71717a; font-size: .85rem; margin-top: .75rem; }
+  #mode { color: #71717a; font-size: .8rem; margin-top: .25rem; }
+  #search-results { list-style: none; margin: .5rem 0 0; padding: 0; }
+  #search-results li { padding: .4rem 0; border-bottom: 1px solid #f4f4f5; font-size: .9rem; }
+  #search-results li:last-child { border-bottom: 0; }
+  #search-results .score { color: #71717a; font-size: .8rem; }
 </style>
 </head>
 <body>
 <header>
   <h1>Self-Learning Agent</h1>
-  <p>Rule-based, stdlib-only Python. It remembers facts in SQLite — teach it, restart it, it still knows.</p>
+  <p>Mem0-style long-term memory in SQLite — teach it, restart it, it still knows. Optional LLM + real Mem0 when keys are set.</p>
 </header>
 <main>
   <section class="chat">
@@ -58,20 +63,30 @@
   <aside>
     <h2>Remembered facts</h2>
     <ul id="facts"><li class="empty">Nothing remembered yet.</li></ul>
+    <h2 style="margin-top: 1rem;">Search memory</h2>
+    <form id="search-form">
+      <input id="search-input" autocomplete="off" placeholder="e.g. favourite food">
+      <button type="submit">Search</button>
+    </form>
+    <ul id="search-results"></ul>
     <div class="examples">
       <button data-q="remember that my favourite colour is blue">Remember a fact</button>
       <button data-q="what is my favourite colour?">Recall it</button>
       <button data-q="calculate 12 * (3 + 4)">Calculator</button>
       <button data-q="search notes for hiking">Search notes</button>
       <button data-q="what do you know about me?">List facts</button>
+      <button data-q="search memory favourite food">Search memory</button>
     </div>
     <p id="stats"></p>
+    <p id="mode"></p>
   </aside>
 </main>
 <script>
 const log = document.getElementById('log');
 const factsEl = document.getElementById('facts');
 const statsEl = document.getElementById('stats');
+const modeEl = document.getElementById('mode');
+const searchResultsEl = document.getElementById('search-results');
 const input = document.getElementById('input');
 
 function addMsg(text, cls) {
@@ -93,7 +108,20 @@ async function refreshFacts() {
       : '<li class="empty">Nothing remembered yet.</li>';
     const tools = Object.entries(s.tools).map(([k, v]) => `${k}: ${v}`).join(', ') || 'none yet';
     statsEl.textContent = `${s.facts} fact(s), ${s.interactions} interaction(s). Tools used: ${tools}.`;
+    modeEl.textContent = s.mode || '';
   } catch (e) { /* server unreachable; chat will surface the error */ }
+}
+
+async function searchMemory(q) {
+  try {
+    const r = await fetch('/api/search?q=' + encodeURIComponent(q));
+    const data = await r.json();
+    searchResultsEl.innerHTML = (data.results || []).length
+      ? data.results.map(h => `<li>${h.memory} <span class="score">(score ${h.score})</span></li>`).join('')
+      : '<li class="empty">No memories match.</li>';
+  } catch (e) {
+    searchResultsEl.innerHTML = '<li class="empty">Search failed.</li>';
+  }
 }
 
 async function send(text) {
@@ -123,6 +151,11 @@ document.getElementById('form').addEventListener('submit', e => {
   e.preventDefault();
   const text = input.value.trim();
   if (text) send(text);
+});
+document.getElementById('search-form').addEventListener('submit', e => {
+  e.preventDefault();
+  const q = document.getElementById('search-input').value.trim();
+  if (q) searchMemory(q);
 });
 document.querySelectorAll('.examples button').forEach(b =>
   b.addEventListener('click', () => send(b.dataset.q)));

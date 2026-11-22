@@ -9,7 +9,9 @@ they share the same DB file).
 Endpoints:
   GET  /            -> web/index.html (chat UI)
   GET  /api/facts   -> {"facts": [[key, value], ...]}
-  GET  /api/stats   -> {"facts": n, "interactions": n, "tools": {...}}
+  GET  /api/stats   -> {"facts": n, "interactions": n, "tools": {...},
+                       "llm": ..., "mem0": ..., "mode": ...}
+  GET  /api/search?q=... -> {"results": [{"memory", "score", ...}]}
   POST /api/chat    {"message": "..."} -> {"reply": "...", "tool": "calculator"|...|null}
   Any other static file under web/ is served too (path-traversal safe).
 
@@ -32,17 +34,21 @@ import sys
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
 
 BASE = Path(__file__).resolve().parent
 sys.path.insert(0, str(BASE))
 
 from agent import Agent  # noqa: E402
+from memory import DEFAULT_USER_ID  # noqa: E402
 
 WEB_DIR = BASE / "web"
 LOCK = threading.Lock()  # serialize SQLite access across threads
 
 
-def make_handler(db_path: str, notes_dir: str):
+def make_handler(db_path: str, notes_dir: str,
+                 user_id: str = DEFAULT_USER_ID,
+                 llm="auto", mem0="auto"):
     class Handler(BaseHTTPRequestHandler):
         protocol_version = "HTTP/1.1"
 
@@ -59,31 +65,51 @@ def make_handler(db_path: str, notes_dir: str):
             self.wfile.write(body)
 
         def _agent(self) -> Agent:
-            return Agent(db_path, notes_dir)
+            return Agent(db_path, notes_dir, user_id=user_id,
+                         llm=llm, mem0=mem0)
 
         # -- routes ---------------------------------------------------
         def do_GET(self):
-            if self.path in ("/", "/index.html"):
+            parts = urlsplit(self.path)
+            if parts.path in ("/", "/index.html"):
                 self._serve_file(WEB_DIR / "index.html")
-            elif self.path == "/api/facts":
+            elif parts.path == "/api/facts":
                 with LOCK:
                     a = self._agent()
                     try:
-                        self._json({"facts": a.memory.list_facts()})
+                        self._json({"facts": a.memory.list_facts(
+                            user_id=user_id)})
                     finally:
                         a.close()
-            elif self.path == "/api/stats":
+            elif parts.path == "/api/stats":
                 with LOCK:
                     a = self._agent()
                     try:
-                        self._json(a.memory.stats())
+                        stats = a.memory.stats()
+                        stats["llm"] = (a.llm.model if a.llm else None)
+                        stats["mem0"] = (a.mem0.describe()
+                                         if a.mem0 else "off")
+                        stats["mode"] = a.mode
+                        self._json(stats)
                     finally:
                         a.close()
-            elif self.path.startswith("/api/"):
+            elif parts.path == "/api/search":
+                query = parse_qs(parts.query).get("q", [""])[0].strip()
+                if not query:
+                    self._json({"error": "q is required"}, 400)
+                    return
+                with LOCK:
+                    a = self._agent()
+                    try:
+                        self._json({"results": a.memory.search(
+                            query, user_id=user_id, limit=5)})
+                    finally:
+                        a.close()
+            elif parts.path.startswith("/api/"):
                 self._json({"error": "unknown endpoint"}, 404)
             else:
                 # Static file under web/, traversal-safe.
-                rel = Path(self.path.lstrip("/"))
+                rel = Path(parts.path.lstrip("/"))
                 target = (WEB_DIR / rel).resolve()
                 if WEB_DIR.resolve() not in target.parents or not target.is_file():
                     self._json({"error": "not found"}, 404)
@@ -136,12 +162,26 @@ def main(argv: list[str] | None = None) -> int:
                    default=int(os.environ.get("PORT", "8000")))
     p.add_argument("--db", default=str(BASE / "agent_memory.db"))
     p.add_argument("--notes", default=str(BASE / "notes"))
+    p.add_argument("--user", default=DEFAULT_USER_ID,
+                   help="user_id for memory scoping (default: default)")
+    p.add_argument("--no-llm", action="store_true",
+                   help="force rule-based mode even if a key is set")
+    p.add_argument("--no-mem0", action="store_true",
+                   help="disable the real-Mem0 mirror even if configured")
     args = p.parse_args(argv)
 
+    llm = None if args.no_llm else "auto"
+    mem0 = None if args.no_mem0 else "auto"
     server = ThreadingHTTPServer(
-        (args.host, args.port), make_handler(args.db, args.notes))
+        (args.host, args.port),
+        make_handler(args.db, args.notes, user_id=args.user,
+                     llm=llm, mem0=mem0))
     print(f"Self-learning agent web UI: http://{args.host}:{args.port}", flush=True)
     print(f"Memory: {args.db}  |  Notes: {args.notes}  (Ctrl-C to stop)", flush=True)
+    _probe = Agent(args.db, args.notes, user_id=args.user,
+                   llm=llm, mem0=mem0)
+    print(_probe.mode, flush=True)
+    _probe.close()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
